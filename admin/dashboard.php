@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../bootstrap.php';
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../billing_helpers.php';
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
     header('Location: login.php');
@@ -33,11 +34,7 @@ foreach ($statusData as $domain => $info) {
 
     if ($due) {
         // normalize date string
-        $dueDateObj = DateTimeImmutable::createFromFormat('Y-m-d', $due);
-        if (!$dueDateObj) {
-            // coba format lain
-            $dueDateObj = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $due) ?: null;
-        }
+        $dueDateObj = parse_billing_date($due);
         if ($dueDateObj && $status === 'aktif' && $today > $dueDateObj) {
             $statusData[$domain]['status'] = 'isolir';
             $changed = true;
@@ -59,22 +56,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($action === 'aktif') {
             $statusData[$domain]['status'] = 'aktif';
             $statusData[$domain]['activated_at'] = date('Y-m-d');
-            // perpanjang 30 hari dari hari ini
-            $statusData[$domain]['due_date'] = date('Y-m-d', strtotime('+30 days'));
+            $statusData[$domain]['due_date'] = calculate_due_date_from_activation($statusData[$domain]['activated_at']);
         } elseif ($action === 'isolir') {
             $statusData[$domain]['status'] = 'isolir';
             // keep due_date as-is (optional: set activated_at null)
         } elseif ($action === 'extend') {
-            $currentDue = $statusData[$domain]['due_date'] ?? null;
-            $baseDate = $today;
-            if ($currentDue) {
-                $parsedDue = DateTimeImmutable::createFromFormat('Y-m-d', $currentDue)
-                    ?: DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $currentDue);
-                if ($parsedDue && $parsedDue > $today) {
-                    $baseDate = $parsedDue;
-                }
-            }
-            $statusData[$domain]['due_date'] = $baseDate->modify('+30 days')->format('Y-m-d');
+            $statusData[$domain]['due_date'] = calculate_extended_due_date($statusData[$domain]['due_date'] ?? null, $today);
         }
         file_put_contents($statusFile, json_encode($statusData, JSON_PRETTY_PRINT));
     }
@@ -85,7 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // Helper: hitung hari tersisa (bisa negatif jika lewat)
 function days_left($due_date_str) {
     if (empty($due_date_str)) return null;
-    $due = DateTimeImmutable::createFromFormat('Y-m-d', $due_date_str) ?: DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $due_date_str);
+    $due = parse_billing_date($due_date_str);
     if (!$due) return null;
     $now = new DateTimeImmutable('now');
     $diff = $now->diff($due);

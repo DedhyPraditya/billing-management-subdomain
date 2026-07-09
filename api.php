@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/billing_helpers.php';
 header('Content-Type: application/json');
 header("Cache-Control: no-cache, no-store, must-revalidate");
 header("Pragma: no-cache");
@@ -21,8 +22,9 @@ if (!$data) {
 }
 
 // Auto check jatuh tempo
-$today = date('Y-m-d');
-if ($today > $data['due_date']) {
+$today = new DateTimeImmutable('today');
+$dueDate = parse_billing_date($data['due_date'] ?? null);
+if ($dueDate && $today > $dueDate) {
     $data['status'] = 'isolir';
 }
 

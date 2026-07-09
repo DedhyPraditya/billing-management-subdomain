@@ -1,13 +1,14 @@
 <?php
 require_once __DIR__ . '/../bootstrap.php';
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../billing_helpers.php';
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
     header('Location: login.php');
     exit;
 }
 
-$statusFile = __DIR__ . '/../status.json';
+$statusFile = STATUS_FILE;
 $data = json_decode(file_get_contents($statusFile), true);
 $data = is_array($data) ? $data : [];
 
@@ -18,10 +19,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add')
     $domain = trim($_POST['domain'] ?? '');
     $status = $_POST['status'] ?? 'isolir';
     $activated_at = $_POST['activated_at'] ?? '';
-    $due_date = $_POST['due_date'] ?? '';
+    $due_date = calculate_due_date_from_activation($activated_at);
 
     if ($domain === '') {
         $message = 'Domain tidak boleh kosong!';
+        $messageType = 'danger';
+    } elseif (!$due_date) {
+        $message = 'Tanggal aktivasi tidak valid!';
         $messageType = 'danger';
     } elseif (isset($data[$domain])) {
         $message = 'Domain sudah terdaftar!';
@@ -43,10 +47,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'edit'
     $domain = trim($_POST['domain'] ?? '');
     $status = $_POST['status'] ?? 'isolir';
     $activated_at = $_POST['activated_at'] ?? '';
-    $due_date = $_POST['due_date'] ?? '';
+    $due_date = calculate_due_date_from_activation($activated_at);
 
     if ($domain === '') {
         $message = 'Domain tidak boleh kosong!';
+        $messageType = 'danger';
+    } elseif (!$due_date) {
+        $message = 'Tanggal aktivasi tidak valid!';
         $messageType = 'danger';
     } elseif ($domain !== $old_domain && isset($data[$domain])) {
         $message = 'Domain sudah terdaftar!';
@@ -177,7 +184,7 @@ $adminUser = $_SESSION['admin_user'] ?? ADMIN_USER;
                         <div class="card-title-row">
                             <div>
                                 <h2 class="section-title">Form data pelanggan</h2>
-                                <p class="section-subtitle">Tambahkan domain baru dengan informasi aktivasi dan jatuh tempo.</p>
+                                <p class="section-subtitle">Tambahkan domain baru dengan tanggal aktivasi, lalu jatuh tempo dihitung otomatis 1 bulan ke depan.</p>
                             </div>
                             <span class="soft-badge"><i class="bi bi-plus-circle"></i> Entry Baru</span>
                         </div>
@@ -206,8 +213,8 @@ $adminUser = $_SESSION['admin_user'] ?? ADMIN_USER;
                             </div>
 
                             <div class="mb-3">
-                                <label class="form-label">Jatuh Tempo</label>
-                                <input type="date" class="form-control" name="due_date" id="due_date" required>
+                                <label class="form-label">Jatuh Tempo Otomatis</label>
+                                <input type="date" class="form-control" name="due_date" id="due_date" readonly>
                             </div>
 
                             <div class="d-grid gap-2 pt-2">
@@ -227,7 +234,7 @@ $adminUser = $_SESSION['admin_user'] ?? ADMIN_USER;
                                 </span>
                                 <div>
                                     <h3 class="h6 mb-1">Tips pengisian</h3>
-                                    <p class="text-soft mb-0">Gunakan format domain yang konsisten agar proses pencarian dan update data lebih cepat.</p>
+                            <p class="text-soft mb-0">Tanggal jatuh tempo sekarang otomatis mengikuti 1 bulan kalender dari tanggal aktivasi yang dipilih.</p>
                                 </div>
                             </div>
                         </div>
@@ -345,8 +352,8 @@ $adminUser = $_SESSION['admin_user'] ?? ADMIN_USER;
                         </div>
 
                         <div class="mb-3">
-                            <label class="form-label">Jatuh Tempo</label>
-                            <input type="date" class="form-control" name="due_date" id="edit-due_date" required>
+                            <label class="form-label">Jatuh Tempo Otomatis</label>
+                            <input type="date" class="form-control" name="due_date" id="edit-due_date" readonly>
                         </div>
                     </div>
                     <div class="modal-footer">
@@ -360,18 +367,59 @@ $adminUser = $_SESSION['admin_user'] ?? ADMIN_USER;
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        function calculateDueDate(activationDate) {
+            if (!activationDate) {
+                return '';
+            }
+
+            const [year, month, day] = activationDate.split('-').map(Number);
+            if (!year || !month || !day) {
+                return '';
+            }
+
+            const targetYear = month === 12 ? year + 1 : year;
+            const targetMonth = month === 12 ? 1 : month + 1;
+            const lastDay = new Date(targetYear, targetMonth, 0).getDate();
+            const safeDay = Math.min(day, lastDay);
+
+            return [
+                targetYear,
+                String(targetMonth).padStart(2, '0'),
+                String(safeDay).padStart(2, '0')
+            ].join('-');
+        }
+
+        function syncDueDate(sourceId, targetId) {
+            const activationInput = document.getElementById(sourceId);
+            const dueInput = document.getElementById(targetId);
+
+            if (!activationInput || !dueInput) {
+                return;
+            }
+
+            const applyValue = function() {
+                dueInput.value = calculateDueDate(activationInput.value);
+            };
+
+            activationInput.addEventListener('input', applyValue);
+            activationInput.addEventListener('change', applyValue);
+            applyValue();
+        }
+
         function loadEditForm(domain, status, activated_at, due_date) {
             document.getElementById('edit-old-domain').value = domain;
             document.getElementById('edit-domain').value = domain;
             document.getElementById('edit-status').value = status;
             document.getElementById('edit-activated_at').value = activated_at;
-            document.getElementById('edit-due_date').value = due_date;
+            document.getElementById('edit-due_date').value = calculateDueDate(activated_at) || due_date;
         }
 
         document.addEventListener('DOMContentLoaded', function() {
             const today = new Date().toISOString().split('T')[0];
             document.getElementById('activated_at').value = today;
-            document.getElementById('due_date').value = today;
+            syncDueDate('activated_at', 'due_date');
+            syncDueDate('edit-activated_at', 'edit-due_date');
+            document.getElementById('due_date').value = calculateDueDate(today);
 
             const searchInput = document.getElementById('managementSearch');
             const rows = document.querySelectorAll('#managementTable tbody tr[data-search]');

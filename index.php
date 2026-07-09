@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/billing_helpers.php';
 
 // Redirect ke login jika belum login
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
@@ -20,18 +21,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($action === 'aktif') {
             $data[$domain]['status'] = 'aktif';
             $data[$domain]['activated_at'] = date('Y-m-d');
-            $data[$domain]['due_date'] = date('Y-m-d', strtotime('+30 days'));
+            $data[$domain]['due_date'] = calculate_due_date_from_activation($data[$domain]['activated_at']);
         } elseif ($action === 'extend') {
-            $currentDue = $data[$domain]['due_date'] ?? null;
-            $baseDate = new DateTimeImmutable('now');
-            if ($currentDue) {
-                $parsedDue = DateTimeImmutable::createFromFormat('Y-m-d', $currentDue)
-                    ?: DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $currentDue);
-                if ($parsedDue && $parsedDue > $baseDate) {
-                    $baseDate = $parsedDue;
-                }
-            }
-            $data[$domain]['due_date'] = $baseDate->modify('+30 days')->format('Y-m-d');
+            $data[$domain]['due_date'] = calculate_extended_due_date($data[$domain]['due_date'] ?? null);
         } else {
             $data[$domain]['status'] = 'isolir';
         }
@@ -47,8 +39,7 @@ function days_left($due_date_str) {
         return null;
     }
 
-    $due = DateTimeImmutable::createFromFormat('Y-m-d', $due_date_str)
-        ?: DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $due_date_str);
+    $due = parse_billing_date($due_date_str);
 
     if (!$due) {
         return null;
